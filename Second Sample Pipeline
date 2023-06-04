@@ -1,0 +1,74 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Build') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                // Build your Docker image
+                sh 'docker build -t my-image:${GIT_COMMIT} .'
+            }
+        }
+
+        stage('Scan Image') {
+            steps {
+                // Install Trivy
+                sh 'wget https://github.com/aquasecurity/trivy/releases/download/v0.20.1/trivy_0.20.1_Linux-64bit.tar.gz'
+                sh 'tar zxvf trivy_0.20.1_Linux-64bit.tar.gz'
+                sh 'mv trivy_0.20.1_Linux-64bit/trivy /usr/local/bin/'
+
+                // Scan the Docker image with Trivy and save the result in a file
+                sh 'trivy --severity HIGH,CRITICAL --format json -o trivy-report.json my-image:${GIT_COMMIT}'
+
+                // Parse the Trivy report
+                def vulnerabilities = readJSON file: 'trivy-report.json'
+                def highVulnerabilities = vulnerabilities[0]?.Vulnerabilities?.findAll { it.Severity == 'HIGH' }
+                def criticalVulnerabilities = vulnerabilities[0]?.Vulnerabilities?.findAll { it.Severity == 'CRITICAL' }
+
+                // Abort the build if there are HIGH or CRITICAL vulnerabilities
+                if (highVulnerabilities || criticalVulnerabilities) {
+                    error 'Aborting build due to HIGH or CRITICAL vulnerabilities found in the image'
+                }
+            }
+        }
+
+        stage('Code Quality and Coverage') {
+            steps {
+                // Run Black Duck for vulnerability scanning
+                sh 'blackduck scan --project my-project --version ${GIT_COMMIT} my-image:${GIT_COMMIT}'
+
+                // Run SonarQube for code quality and coverage analysis
+                withSonarQubeEnv('SonarQube') {
+                    sh 'mvn sonar:sonar'
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                // Install Helm
+                sh 'curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash'
+
+                // Add your Helm deployment commands here
+                sh 'helm upgrade --install my-app my-chart --namespace my-namespace'
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
