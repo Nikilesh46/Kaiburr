@@ -1,0 +1,52 @@
+pipeline {
+    agent any
+    
+    tools {
+        nodejs 'nodejs-10'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/jaiswaladi246/NodeJS_WebApp_Public.git'
+            }
+        }
+        
+        stage('Install Dependencies') {
+            steps {
+                sh 'npm install'
+            }
+        }
+        stage('OWASP Dependencies Check') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ ', odcInstallation: 'DP'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage('Docker Image build and push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-hub', toolName: 'docker') {
+                        
+                        sh "docker build -t demonodejs ."
+                        sh "docker tag demonodejs nkdh2023/nodejs:latest"
+                        sh "docker push nkdh2023/nodejs:latest"
+                        
+                    }
+                }
+            }
+        }
+        
+        stage('Docker Run') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-hub', toolName: 'docker') {
+                        
+                        sh "docker run -d --name demo-node.js -p 8081:8081 nkdh2023/nodejs:latest"
+                        
+                    }
+                }
+            }
+        }
+    }
+}
